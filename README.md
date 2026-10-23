@@ -20,7 +20,7 @@ Dominios: `fraud`, `fees`, `cards`, `loans` y `support` (variable `DOMAIN`).
 |---|---|---|
 | `main` | arquetipo: capas, contratos y `TODO` por sesión | ✅ |
 | `t1-s1` | `/chat` con respuesta tipada contra el mock de Foundry | ✅ |
-| `t1-s2` = `t1-v0.1` | historial por sesión, errores tipados, consumo por turno y Entra ID | ⏳ |
+| `t1-s2` = `t1-v0.1` | historial por sesión, errores tipados, consumo por turno y Entra ID | ✅ |
 | `t2-s3` | ingesta del corpus del dominio e índice local | ⏳ |
 | `t2-s4` | retrieval híbrido y RAG con citas en `/chat` | ⏳ |
 | `t2-s5` = `t2-v0.2` | evaluación del RAG y Azure AI Search | ⏳ |
@@ -28,7 +28,7 @@ Dominios: `fraud`, `fees`, `cards`, `loans` y `support` (variable `DOMAIN`).
 | `t4-*` → `t4-v0.4` | despliegue, trazas, evaluaciones y guardrails | ⏳ |
 | `v1.0` | integración final | ⏳ |
 
-Esta copia está en `t1-s1`. Para saber en qué versión está la tuya: `git describe --tags`.
+Esta copia está en `t1-s2` = `t1-v0.1`. Para saber en qué versión está la tuya: `git describe --tags`.
 
 ## Requisitos
 
