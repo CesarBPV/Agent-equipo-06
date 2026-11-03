@@ -89,3 +89,34 @@ Tras `az logout`: `Error 502 (upstream): no se pudo obtener token de Entra ID (�
 - [x] Tabla de latencia y tokens de las 5 conversaciones en `RESULTS.md`
 - [ ] El equipo explica 2 trade-offs de modelo y costo (borrador en la sección 4, falta la discusión del equipo)
 - [x] `.env` sin ninguna key: `FOUNDRY_AUTH_PROVIDER=entra_id` y sin línea `FOUNDRY_API_KEY`
+
+## 6. Sesión 3 · Experimento con el tamaño de chunk (paso 11)
+
+Dominio `fees`, 12 documentos, mismo chunker y mismo corpus. Solo cambia `INGEST_CHUNK_MAX_CHARS`.
+
+| `INGEST_CHUNK_MAX_CHARS` | Chunks | Largo medio (car.) | Máximo (car.) |
+|---:|---:|---:|---:|
+| 1500 | **29** | 243 | 677 |
+| 250 | **38** | 206 | 572 |
+
+El valor de 1500 coincide con los 29 chunks que anuncia la guía para fees. Con 250 hay 9 chunks más (+31%).
+
+Documentos que se parten más con 250 (1500 → 250): `transfer-fees.csv` 1 → 4, `credit-cards-fees.pdf` 3 → 5, `fee-refund-policy.docx` 3 → 4, `additional-services-fees.docx` 2 → 3, `savings-accounts-fees.html` 2 → 3, `transfer-fees-2024.csv` 1 → 2. El resto no cambia.
+
+### Qué se gana: precisión
+Cada chunk habla de una sola cosa y su embedding representa mejor ese tema. Ejemplo: en `fee-refund-policy.docx`, la sección "Cómo se solicita" se parte en un chunk sobre cómo pedir la devolución (app, teléfono o agencia) y otro sobre que el asistente no la ejecuta y pide confirmación. Una pregunta sobre uno de los dos temas encuentra un chunk más puro. En `transfer-fees.csv`, 4 chunks en lugar de 1 dan más probabilidad de recuperar solo las filas relevantes.
+
+### Qué se pierde: contexto
+Una regla y su excepción pueden quedar en chunks distintos. Ejemplos reales de este corpus con 250:
+- **Regla separada de su excepción.** En `credit-cards-fees.pdf`, "Reposición de tarjeta por pérdida o deterioro: S/ 20" queda en un chunk y "Por robo o fraude, la primera reposición del año no tiene costo" en otro. Si el retrieval trae solo el primero, el agente diría que la reposición cuesta S/ 20 también en caso de robo, lo cual es incorrecto.
+- **Cifra separada de su etiqueta.** En la tabla de membresías de la misma fuente, la fila de Platinum se corta: el chunk 1 termina en "Platinum, Membresía anual: S/ 480, Exoneración:" y su valor ("consumo anual de S/ 25 000") queda al inicio del chunk 2. Para un tarifario, con cifras exactas, esto es grave.
+
+### Otras observaciones
+- Con 1500 el largo medio ya es 243: las secciones de este corpus son cortas, así que el efecto de bajar a 250 se concentra en pocos documentos (6 de 12).
+- El límite no es estricto: con 250 hay chunks de hasta 572 caracteres. Probablemente por el camino de títulos que se antepone y por líneas o filas de tabla que el chunker no parte.
+- Los PDF llegan a Markdown como líneas sueltas (`Tarjeta:` / `Clásica, Membresía anual:`...). Es un reto propio de fees: convendría convertir las tablas de los PDF a filas completas antes del chunking (cambio en `loaders.py`, a evaluar en S4).
+
+### Decisión provisional
+Mantener `INGEST_CHUNK_MAX_CHARS=1500`. Para fees (cifras exactas y excepciones cerca de la regla) pesa más conservar el contexto que ganar precisión. En la sesión 4 se mide el efecto con preguntas reales; este número es una hipótesis.
+
+> Método: conteos obtenidos con el mismo código de ingesta (`load_corpus` y `chunk_document`) sin llamar a Foundry, para no tocar `data/`. Al correr `uv run ingest build` con cada valor deben salir las mismas cantidades.
