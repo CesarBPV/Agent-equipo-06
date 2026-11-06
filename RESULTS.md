@@ -120,3 +120,53 @@ Una regla y su excepción pueden quedar en chunks distintos. Ejemplos reales de 
 Mantener `INGEST_CHUNK_MAX_CHARS=1500`. Para fees (cifras exactas y excepciones cerca de la regla) pesa más conservar el contexto que ganar precisión. En la sesión 4 se mide el efecto con preguntas reales; este número es una hipótesis.
 
 > Método: conteos obtenidos con el mismo código de ingesta (`load_corpus` y `chunk_document`) sin llamar a Foundry, para no tocar `data/`. Al correr `uv run ingest build` con cada valor deben salir las mismas cantidades.
+
+## 7. Sesión 4 · RAG con búsqueda híbrida (borrador)
+
+Dominio `fees`, 29 chunks (`INGEST_CHUNK_MAX_CHARS=1500`), `gpt-5-mini`, embeddings `text-embedding-3-small`, base local (Qdrant) con `SEARCH_TOP_K=5`.
+Una sola corrida por pregunta; los tiempos de `gpt-5-mini` varían entre corridas. "Primer texto" y "completa" son los que imprime `dev/chat.py`.
+
+### 7.1 Las cinco preguntas (paso 11)
+
+| Tipo | Pregunta | Fuentes que citó | ¿Fuente correcta? | Primer texto (ms) | Completa (ms) | Tokens ent. / sal. |
+|---|---|---|---|---:|---:|---:|
+| regla | ¿Cuánto cobran por retirar en un cajero de otro banco? | `fees-faq.md`, `atm-network.html` | Sí | 7306 | 7460 | 826 / 353 |
+| seguimiento (1/2) | Me cobraron dos veces una comisión, ¿se puede devolver? | `fees-faq.md`, `fee-refund-policy.docx` ×2 | Sí | 7219 | 7367 | 855 / 682 |
+| seguimiento (2/2) | ¿y en cuánto tiempo me la devuelven? | `fee-refund-policy.docx` › Plazos | Sí: entendió "la" gracias al rewrite (15 días hábiles, abono en 2) | 9413 | 9540 | 1225 / 948 |
+| término exacto | ¿Qué es el ITF? | `itf-tax.md` ×3, `fees-faq.md`, `fees-glossary.md` | Sí | 6091 | 6348 | 765 / 585 |
+| documento vencido | ¿Cuánto era la comisión por transferencias interbancarias en 2024? | ninguna | Sí: no citó `transfer-fees-2024.csv`; dijo que no tiene el dato | 5686 | 5824 | 859 / 516 |
+| fuera del corpus | ¿A cuánto está el dólar hoy? | ninguna | Sí: `out_of_scope`, sin fuentes | 4482 | 4626 | 942 / 343 |
+
+Los tokens del turno de seguimiento incluyen la llamada de reescritura (`SearchQuery`).
+
+Observaciones:
+- Con el mock el streaming se nota (primer texto 308 ms, completa 1426 ms). **Con `gpt-5-mini` casi no**: el primer texto llega 100 a 250 ms antes del final, porque el modelo razona varios segundos antes de emitir. La espera que siente el usuario (4 a 9 s) es el razonamiento, no el streaming.
+- Con el mock, la pregunta del cajero sale `out_of_scope`: sus reglas de palabras son de fraude. No es un fallo del agente.
+
+### 7.2 `SEARCH_TOP_K` (paso 12)
+
+| K | Fragmentos enviados | Cajero: tokens ent. / sal., completa | ITF: tokens ent. / sal., completa |
+|---:|---:|---|---|
+| 2 | 2 | 640 / 265, 6.7 s | 600 / 330, 4.0 s |
+| 5 (actual) | 5 | 826 / 353, 7.5 s | 765 / 585, 6.3 s |
+| 10 | 10 | 1306 / 592, 8.9 s | 1340 / 837, 8.5 s |
+
+- **Con 2:** las respuestas salieron correctas y con fuente en estas dos preguntas. Riesgo: una respuesta que necesita varios documentos queda corta (ITF está repartido en 3 chunks de `itf-tax.md` más glosario y FAQ).
+- **Con 10:** cuesta 2.0 a 2.2 veces los tokens de entrada que K=2 y tarda más. Entran fuentes que no vienen al caso (`savings-accounts-fees`, `credit-cards-fees`, `transfer-fees`, `fee-refund-policy` en la pregunta del ITF) y, en el cajero, la fuente principal pasó a ser `savings-accounts-fees.html` en vez del FAQ.
+- **Valor propuesto: 5** (el actual), a confirmar por el equipo. Es un punto medio entre costo y cobertura; en la sesión 5 se mide con el golden set y el juez, no a ojo.
+
+### 7.3 Problema encontrado en el chunker con `fees-faq.md`
+El FAQ usa `###` directamente bajo `#` (sin `##`). El chunker arma la ruta con `path[: level - 1]`, y con nivel 3 conserva la pregunta anterior como si fuera un título padre. Resultado, las rutas de sección quedan así:
+
+```
+Preguntas frecuentes sobre comisiones > ¿Cuánto cobran por retirar en un cajero de otro banco?
+… > ¿Cuánto cobran por retirar en un cajero de otro banco? > ¿El ITF es una comisión del banco?
+… > ¿Cuánto cobran por retirar en un cajero de otro banco? > ¿Puedo pedir que me devuelvan una comisión?
+… > ¿Cuánto cobran por retirar en un cajero de otro banco? > ¿Cuánto cuesta el estado de cuenta en papel?
+```
+
+La pregunta del cajero queda escrita al inicio del `content` de 3 chunks que no hablan de eso, y contamina los embeddings y la búsqueda por palabras. Con K=5 la búsqueda del cajero devolvió 4 chunks de `fees-faq` (los 4 del FAQ), cuando solo uno responde. Este es el tipo de adaptación del chunker a un dominio que pide el gate T2. Propuesta: llevar la ruta por nivel real de título (descartar los títulos de nivel igual o mayor al nuevo), reconstruir con `uv run ingest build` y volver a medir.
+
+### 7.4 Pendiente
+- Paso 13: publicar en Azure AI Search y comparar local frente a AI Search (necesita `SEARCH_ENDPOINT` y `SEARCH_INDEX` de la ficha del equipo).
+- Decidir el `SEARCH_TOP_K` del equipo.
