@@ -4,7 +4,7 @@ from agent.domain.knowledge import Chunk
 from agent.infrastructure.search.azure_search_knowledge_base import (
     AzureSearchKnowledgeBase,
     from_document,
-    still_valid_filter,
+    still_valid_filter, 
 )
 
 
